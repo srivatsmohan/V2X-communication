@@ -1,0 +1,166 @@
+import subprocess
+import numpy as np
+import csv
+from numpy import genfromtxt
+import time
+
+mac_map = {'18:D6:C7:51:BE:24': 0, 'D4:6E:0E:F5:CF:2C': 1, '84:16:F9:9B:CE:46': 2}
+index_mac = {'0': '18:D6:C7:51:BE:24', '1': 'D4:6E:0E:F5:CF:2C', '2': '84:16:F9:9B:CE:46'}
+ap_name = {'18:D6:C7:51:BE:24': 'Garden', 'D4:6E:0E:F5:CF:2C': 'ECE_AP', '84:16:F9:9B:CE:46':'SP Building'}
+thrld = 4
+ping = []
+def do_ping():
+    ping  = subprocess.Popen(['ping', '-c','4', '192.168.0.1'],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    return ping.communicate()[0].split('\n')[1].split("time=")[1]
+
+
+def do_scan():
+    scan_out = np.full(3, -np.inf)
+    scan = subprocess.Popen(['/home/pi/Downloads/wpa_supplicant-2.6/wpa_supplicant/wpa_cli', 'scan'],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if scan.communicate()[0].split('\n')[1] == 'OK':
+        scan_res = subprocess.Popen(['/home/pi/Downloads/wpa_supplicant-2.6/wpa_supplicant/./wpa_cli', 'scan_results'],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        res = (scan_res.communicate()[0].split('\n')[1:])
+        for i in range(len(res)):
+            if 'iisc-FT' in res[i]:
+                if res[i].split('\t')[0] == '18:d6:c7:51:be:24':
+                    scan_out[0] = res[i].split('\t')[2]
+                elif res[i].split('\t')[0] == 'd4:6e:0e:f5:cf:2c':
+                    scan_out[1] = res[i].split('\t')[2]
+                elif res[i].split('\t')[0] == '84:16:f9:9b:ce:46':
+                    scan_out[2] = res[i].split('\t')[2]
+    return scan_out
+
+def main():
+    flag = False
+    scan_out = np.zeros(3)
+    rssi = genfromtxt('data.csv', delimiter=',')
+    rssi_norm = np.zeros([len(rssi), 3])
+    for i in range(len(rssi)):
+        rssi_norm[i] = rssi[i] / np.sqrt(np.sum(rssi[i] ** 2))
+
+    rssi[rssi == 0] = -np.inf
+    rssi_trajtry = [[], [], []]
+    scan_happened_now = False
+
+    file = open("smart_config.txt", "w+")
+
+    while True:
+
+        
+        if flag is False:
+            scan_out = do_scan()
+            while scan_out[0] == -np.inf and scan_out[1] == -np.inf and scan_out[2] == -np.inf:
+                scan_out = do_scan()
+                time.sleep(1)
+            #scan_out_norm = scan_out / np.sqrt(np.sum(scan_out ** 2))
+            loc = np.argmin(np.nansum(np.abs(rssi - np.tile(scan_out, [len(rssi), 1])), 1))
+            #loc = np.argmax(np.matmul(rssi_norm, scan_out_norm))
+            cur_loc = loc
+            flag = True
+            print "Beginning"
+        else:
+
+            #######################################################
+            # Code to find the current AP and current RSSI
+            #######################################################
+            reg_data = subprocess.Popen(['iwconfig', 'wlan0'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            wlan_info = reg_data.communicate()[0]
+            if "Access Point" in wlan_info.split('\n')[1] and "Signal level" in wlan_info.split('\n')[6]:
+                cur_ap = wlan_info.split('\n')[1].split('Access Point: ')[1].split(' ')[0]
+                cur_rssi = wlan_info.split('\n')[6].split('Signal level=')[1].split(' ')[0]
+                rssi_trajtry[mac_map[cur_ap]].append(cur_rssi)
+                print "Region normal"
+            else:
+                scan_out = do_scan()
+                while scan_out[0] == -np.inf and scan_out[1] == -np.inf and scan_out[2] == -np.inf:
+                    scan_out = do_scan()
+                    time.sleep(1)
+                subprocess.Popen(['/home/pi/Downloads/wpa_supplicant-2.6/wpa_supplicant/wpa_cli', 'roam',
+                                  index_mac[str(np.argmax(scan_out))]], stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+                cur_loc = np.argmin(np.nansum(np.abs(rssi - np.tile(scan_out, [len(rssi), 1])), 1))
+                cur_ap = index_mac[str(np.argmax(scan_out))]
+                cur_rssi = np.max(scan_out)
+                rssi_trajtry[mac_map[cur_ap]].append(cur_rssi)
+                scan_happened_now = True
+                print "Region blind"
+
+            ######################################################
+            # Code to find the current location Include Here    #
+            ######################################################
+            if scan_happened_now is False:
+                if cur_loc < len(rssi) - 2:
+                    ap_index = mac_map[cur_ap]
+                    cur_loc += np.argmin(np.abs(np.array([rssi[cur_loc][ap_index], rssi[cur_loc + 1][ap_index],
+                              rssi[cur_loc + 2][ap_index]])-float(cur_rssi)))
+                elif cur_loc < len(rssi) - 1:
+                    cur_loc +=1
+                else:
+                    cur_loc = cur_loc 
+            else:
+                cur_loc = cur_loc
+
+            print rssi[cur_loc]
+
+            ################################################################
+            # Code to hand-off
+            ################################################################
+            if float(cur_rssi) < -70.0:
+                subprocess.Popen(['/home/pi/Downloads/wpa_supplicant-2.6/wpa_supplicant/wpa_cli', 'roam',
+                              index_mac[str(np.argmax(rssi[cur_loc]))]], stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT)
+		print "Threshold hand-off"
+            else:
+                loc_max_index = np.argmax(rssi[cur_loc])
+                if loc_max_index != mac_map[cur_ap]:
+                    if cur_loc < len(rssi) - 2:
+                        mx = np.array([rssi[cur_loc][loc_max_index], rssi[cur_loc + 1][loc_max_index],
+                                            rssi[np.mod(cur_loc + 2, len(rssi))][loc_max_index]])
+                    elif cur_loc < len(rssi) - 1:
+                        mx = np.array([rssi[cur_loc][loc_max_index], rssi[cur_loc + 1][loc_max_index]])
+                    else:
+                        mx = rssi[cur_loc][loc_max_index]
+
+                    if np.max(np.abs(mx - np.min(mx))) < thrld:
+                        subprocess.Popen(['/home/pi/Downloads/wpa_supplicant-2.6/wpa_supplicant/./wpa_cli', 'roam',
+                                  index_mac[str(np.argmax(rssi[cur_loc]))]], stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+		        print "Better AP found"
+            time.sleep(1)
+        
+            ###########################################
+            # Code for Diagnostics
+            ###########################################
+            TGREEN = '\033[32m'
+            TRED = '\033[31m'
+            TWHITE = '\033[37m'
+                      
+            #ping.append(do_ping())
+            if ap_name[cur_ap] == "Garden":
+                output_string1 = ap_name[cur_ap]+ " " + cur_rssi  + "db"   
+                output_string2 = "\t" + 'RTT ' +  do_ping() 
+                print TRED + output_string1 + TWHITE + output_string2 
+                file.write(output_string1 + output_string2 + '\n')
+
+            elif ap_name[cur_ap] == "ECE_AP":
+                output_string1 = ap_name[cur_ap]+ " " + cur_rssi  + "db"   
+                output_string2 = "\t" + 'RTT ' + do_ping()
+                print TBLUE + output_string1 + TWHITE + output_string2  
+                file.write(output_string1 + output_string2 + '\n')
+
+            elif ap_name[cur_ap] == "SP Building":
+                output_string1 = ap_name[cur_ap]+ " " + cur_rssi  + "db"   
+                output_string2 = "\t" + 'RTT ' + do_ping()
+                print TGREEN + output_string1 + TWHITE + output_string2 
+                file.write(output_string1 + output_string2 + '\n')
+
+    #for i in range(len(ping)):
+    #    ping[i] = (float)ping[i]
+    #ping = np.array(ping)
+    #av_rtt = np.sum(ping)/ len(ping) 
+    #file.close()
+if __name__ == "__main__":
+    main()
