@@ -1,0 +1,83 @@
+import curses
+from time import sleep
+import socket
+import threading 
+
+global udp_ip
+global udp_port
+udp_ip = '192.168.0.112'
+udp_port = 2399
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+screen = curses.initscr()
+curses.noecho()
+curses.cbreak()
+screen.keypad(True)
+
+global char
+char = ' '
+
+def getchar():
+	global char
+	try:
+		while True:
+			char = screen.getch()
+	finally:
+		curses.nocbreak(); screen.keypad(0); curses.echo()
+    		curses.endwin()
+def sendudp():
+	global char
+	global udp_ip
+	global udp_port
+	count = 0
+	while True:
+#	for i in range(1,10):
+		if char == ord(' '):
+			count = count + 1
+			message = 'S,' + str(count)
+			sock.sendto(message , (udp_ip, udp_port))
+			print 'Stop\r'
+		elif char == curses.KEY_UP:
+			count = count + 1
+			message = 'U,' + str(count)
+			sock.sendto(message , (udp_ip, udp_port))
+			print 'Forward\r'
+		elif char == curses.KEY_DOWN:
+			count = count + 1
+			message = 'D,' + str(count)
+			sock.sendto(message , (udp_ip, udp_port))
+			print 'Backward\r'
+		elif char == curses.KEY_RIGHT:
+			count = count + 1
+			message = 'R,' + str(count)
+			sock.sendto(message , (udp_ip, udp_port))
+			print 'Right\r'
+		elif char == curses.KEY_LEFT:
+			count = count + 1
+			message = 'L,' + str(count)
+			sock.sendto(message , (udp_ip, udp_port))
+		    	print 'Left\r'
+		elif char == ord('/'):
+			count = count + 1
+			message = '/,' + str(count)
+			sock.sendto(message , (udp_ip, udp_port))
+		    	print 'B-Left\r'
+		elif char == ord('1'):
+			count = count + 1
+			message = '1,' + str(count)
+			sock.sendto(message , (udp_ip, udp_port))
+		    	print 'B-Right\r'
+		sleep(0.05)
+
+t1 = threading.Thread(name='getchar', target=getchar)
+t1.daemon = True
+t1.start()
+
+t2 = threading.Thread(name='sendudp', target=sendudp)
+t2.daemon = True
+t2.start()
+
+while True:
+	sleep (1)
+		
