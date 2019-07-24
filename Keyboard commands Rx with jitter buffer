@@ -1,0 +1,200 @@
+import RPi.GPIO as GPIO
+from time import sleep
+import socket
+import threading
+#import queue
+#import array
+
+udp_ip = '192.168.0.112'
+udp_port = 2399
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind((udp_ip, udp_port)) 
+
+GPIO.setwarnings(False)
+GPIO.setmode(GPIO.BOARD)
+GPIO.setup(8, GPIO.OUT, initial = GPIO.LOW)
+GPIO.setup(10, GPIO.OUT, initial = GPIO.LOW)
+GPIO.setup(16, GPIO.OUT, initial = GPIO.LOW)
+GPIO.setup(18, GPIO.OUT, initial = GPIO.LOW)
+
+global buff
+buff = ['X','X','X','X','X','X']
+
+global delay
+delay = input("Enter delay: ")
+
+global data
+data = 'S'
+
+global checker
+checker = False
+
+global lost
+lost = False
+
+global first
+first = 0
+
+def actuate(): 
+#	print threading.currentThread().getName(), 'Starting'
+	global delay
+	global data
+#	global lost
+	while True:
+		if data == 'U':
+			print 'Forward'
+			GPIO.output(10, GPIO.HIGH)
+			GPIO.output(18, GPIO.HIGH)
+			while data =='U':
+				GPIO.output(8, GPIO.HIGH)
+				GPIO.output(16, GPIO.HIGH)
+				sleep(delay)
+				GPIO.output(8, GPIO.LOW)
+				GPIO.output(16, GPIO.LOW)
+				sleep(delay)
+
+		elif data == 'D':
+			print 'Backward'
+			GPIO.output(10, GPIO.LOW)
+			GPIO.output(18, GPIO.LOW)
+			while data =='D':
+				GPIO.output(8, GPIO.HIGH)
+				GPIO.output(16, GPIO.HIGH)
+				sleep(delay)
+				GPIO.output(8, GPIO.LOW)
+				GPIO.output(16, GPIO.LOW)
+				sleep(delay)
+
+		elif data == 'R':
+			print 'Right'
+			GPIO.output(10, GPIO.HIGH)
+			GPIO.output(18, GPIO.HIGH)
+			while data =='R':
+				GPIO.output(8, GPIO.HIGH)
+				GPIO.output(16, GPIO.HIGH)
+				sleep (delay)
+				GPIO.output(8, GPIO.LOW)
+				sleep (delay)
+				GPIO.output(8, GPIO.HIGH)
+				sleep (delay)
+				GPIO.output(8, GPIO.LOW)
+		       		GPIO.output(16, GPIO.LOW)
+
+		elif data == 'L':
+			print 'Left'
+			GPIO.output(10, GPIO.HIGH)
+			GPIO.output(18, GPIO.HIGH)
+			while data =='L':
+			    	GPIO.output(16, GPIO.HIGH)
+			    	GPIO.output(8, GPIO.HIGH)
+			    	sleep (delay)
+			    	GPIO.output(16, GPIO.LOW)
+			    	sleep (delay)
+			    	GPIO.output(16, GPIO.HIGH)
+			    	sleep (delay)
+			    	GPIO.output(16, GPIO.LOW)
+			    	GPIO.output(8, GPIO.LOW)
+
+		elif data == '/':
+			print 'B-Left'
+			GPIO.output(10, GPIO.LOW)
+			GPIO.output(18, GPIO.LOW)
+			while data =='/':
+			    	GPIO.output(16, GPIO.HIGH)
+			    	GPIO.output(8, GPIO.HIGH)
+			    	sleep (delay)
+			    	GPIO.output(16, GPIO.LOW)
+			    	sleep (delay)
+			    	GPIO.output(16, GPIO.HIGH)
+			    	sleep (delay)
+			    	GPIO.output(16, GPIO.LOW)
+			    	GPIO.output(8, GPIO.LOW)
+
+		elif data == '1':
+			print 'B-Right'
+			GPIO.output(10, GPIO.LOW)
+			GPIO.output(18, GPIO.LOW)
+			while data =='1':
+			    	GPIO.output(8, GPIO.HIGH)
+			    	GPIO.output(16, GPIO.HIGH)
+			    	sleep (delay)
+			    	GPIO.output(8, GPIO.LOW)
+			    	sleep (delay)
+			    	GPIO.output(8, GPIO.HIGH)
+			    	sleep (delay)
+			    	GPIO.output(8, GPIO.LOW)
+			    	GPIO.output(16, GPIO.LOW)
+
+		elif data == 'S':
+			print 'Stop'
+			while data == 'S':
+				sleep (delay)
+
+#		elif lost == True:
+#				sleep (1)
+# 		else:
+#			print data
+#	print threading.currentThread().getName(), 'Exiting'
+
+def read():
+	global buff
+#	print threading.currentThread().getName(), 'Starting'
+	global data
+	global first
+	first = 0
+	global j
+	prev = 0
+	while True:
+		datacount, addr = sock.recvfrom(2014)
+		first = 1
+#		print first
+		splits = datacount.split(',')
+		num = int(splits[1])
+#		print splits[0], num
+		j = num%6 
+		buff[j] = splits[0]
+		print buff,'written',splits[0],'to',j
+
+def check():
+	global data
+	global buff
+	global first
+	global j
+	count = 0
+#	print first, 'check'
+	while True:
+		if first == 1:
+#			print "begin"
+			i = 0
+			sleep (0.05)
+			while True:
+				i = i + 1
+				if i == 6:
+					i = 0
+				if buff[i] == 'X':
+					count = count + 1
+					if count == 3:
+						data = 'S'
+				else:
+					data = buff[i]
+					count = 0
+				print buff,'Excecuting',buff[i],'from',i
+				print data
+				sleep (0.05)
+				buff[i] = 'X'
+
+t1 = threading.Thread(name='read', target=read)
+t1.daemon = True
+t1.start()
+
+t2 = threading.Thread(name='actuate', target=actuate)
+t2.daemon = True
+t2.start()
+
+t3 = threading.Thread(name='check', target=check)
+t3.daemon = True
+t3.start()
+
+while True:
+	sleep (1)
